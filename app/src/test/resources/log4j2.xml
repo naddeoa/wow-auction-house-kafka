@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<Configuration status="WARN">
+    <Appenders>
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%highlight{%d{HH:mm:ss.SSS} [%level][%logger{1.}.%M()][%t t%tid] %msg%n}"/>
+        </Console>
+
+    </Appenders>
+    <Loggers>
+        <Logger name="WowAHKafkaBlog" level="info">
+            <AppenderRef ref="Console"/>
+        </Logger>
+
+        <Root level="all">
+        </Root>
+    </Loggers>
+</Configuration>

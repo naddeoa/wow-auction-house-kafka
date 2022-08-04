@@ -9,7 +9,7 @@ import org.junit.jupiter.api.Test
 //import kotlin.test.Test
 
 class AppTest {
-    @Test
+//    @Test
     fun test() {
 
         val auctions = data.get("auctions")
@@ -18,7 +18,7 @@ class AppTest {
         }
     }
 
-    @Test
+//    @Test
     fun testMap() {
         val auctions = data.get("auctions")
         val items = toFlatDict(auctions)

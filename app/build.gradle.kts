@@ -80,6 +80,7 @@ dependencies {
     implementation("io.github.microutils:kotlin-logging-jvm:2.1.20")
 //    implementation("org.slf4j:slf4j-simple:1.7.36") // for stdout logging
     implementation("ch.qos.logback:logback-classic:1.0.13") // for stdout logging
+    implementation("com.michael-bull.kotlin-retry:kotlin-retry:1.0.9")
 
     // Server
     implementation("io.javalin:javalin:4.6.4")

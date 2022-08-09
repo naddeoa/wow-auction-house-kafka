@@ -5,3 +5,5 @@
 build
 
 .idea
+conf.env
+compose.env

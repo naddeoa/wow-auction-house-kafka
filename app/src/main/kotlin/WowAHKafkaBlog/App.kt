@@ -161,7 +161,7 @@ fun enqueueAuctionData() = runBlocking {
             // For each auction, send to kafka
             logger.info("Sending auctions to kafka")
             toFlatDict(auctions).forEach { data ->
-                val record = ProducerRecord<String, String>("wow-ah", mapper.writeValueAsString(data))
+                val record = ProducerRecord<String, String>(kafkaTopic, mapper.writeValueAsString(data))
                 producer.send(record)
             }
         }

@@ -17,7 +17,7 @@ build-docker:$(JAR_PATH)
 	docker build . -t $(TAG)
 
 run-docker:
-	docker run -p --net=host --env-file conf.env $(TAG)
+	docker run --net=host --env-file conf.env $(TAG)
 
 push-docker:
 	docker push $(TAG)

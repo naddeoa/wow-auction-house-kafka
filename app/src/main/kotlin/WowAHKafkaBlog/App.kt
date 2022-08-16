@@ -28,7 +28,7 @@ import org.apache.kafka.clients.producer.ProducerRecord
 val logger = KotlinLogging.logger("WowAHKafkaBlog")
 val mapper = jacksonObjectMapper()
 
-val kafkaCluster = System.getenv("KAFKA_BOOTSTRAP_SERVER") ?: "localhost:9093"
+val kafkaCluster = System.getenv("KAFKA_BOOTSTRAP_SERVER") ?: "localhost:9092"
 val kafkaTopic = System.getenv("KAFKA_TOPIC") ?: "wow-ah"
 
 val apiClientId =
@@ -155,7 +155,13 @@ fun enqueueAuctionData() = runBlocking {
     try {
         val auctions = retry(defaultRetryPolicy) {
             getAuctionHouseData()
-        } ?: return@runBlocking
+        }
+
+        if (auctions == null) {
+            val record = ProducerRecord<String, String>("heartbeat", "1")
+            producer.send(record)
+            return@runBlocking
+        }
 
         // For each auction, send to kafka
         logger.info("Sending ${auctions.size()} auctions to kafka")
@@ -174,7 +180,7 @@ fun main() {
     executorService.scheduleWithFixedDelay(
         ::enqueueAuctionData,
         0,
-        Duration.of(10, ChronoUnit.MINUTES).seconds,
+        Duration.of(5, ChronoUnit.MINUTES).seconds,
         TimeUnit.SECONDS
     )
 

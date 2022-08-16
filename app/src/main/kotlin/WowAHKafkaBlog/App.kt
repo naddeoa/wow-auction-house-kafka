@@ -101,7 +101,7 @@ fun toFlatDict(array: JsonNode): Collection<Map<String, Any>> {
     return allItems.values
 }
 
-fun getKafkaConsumer(): KafkaProducer<String, String> {
+val producer: KafkaProducer<String, String> by lazy {
     logger.info("Connecting to kafka cluster at $kafkaCluster")
     val consumerConfig = mapOf(
         ProducerConfig.BOOTSTRAP_SERVERS_CONFIG to kafkaCluster,
@@ -109,7 +109,7 @@ fun getKafkaConsumer(): KafkaProducer<String, String> {
         ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG to "org.apache.kafka.common.serialization.StringSerializer",
         ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG to "org.apache.kafka.common.serialization.StringSerializer",
     )
-    return KafkaProducer<String, String>(consumerConfig)
+    KafkaProducer<String, String>(consumerConfig)
 }
 
 var lastRunModifiedIso: String? = null
@@ -157,13 +157,11 @@ fun enqueueAuctionData() = runBlocking {
             getAuctionHouseData()
         } ?: return@runBlocking
 
-        getKafkaConsumer().use { producer ->
-            // For each auction, send to kafka
-            logger.info("Sending auctions to kafka")
-            toFlatDict(auctions).forEach { data ->
-                val record = ProducerRecord<String, String>(kafkaTopic, mapper.writeValueAsString(data))
-                producer.send(record)
-            }
+        // For each auction, send to kafka
+        logger.info("Sending ${auctions.size()} auctions to kafka")
+        toFlatDict(auctions).forEach { data ->
+            val record = ProducerRecord<String, String>(kafkaTopic, mapper.writeValueAsString(data))
+            producer.send(record)
         }
     } catch (ex: Throwable) {
         // Swallow errors here to avoid executorService cancelling the schedule
@@ -179,6 +177,12 @@ fun main() {
         Duration.of(10, ChronoUnit.MINUTES).seconds,
         TimeUnit.SECONDS
     )
+
+    Runtime.getRuntime().addShutdownHook(Thread {
+        logger.info("Closing producer")
+        producer.close()
+    })
+
 
     Javalin.create().start(8089)
 }

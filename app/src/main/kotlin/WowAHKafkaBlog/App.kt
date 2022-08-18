@@ -54,8 +54,10 @@ fun refreshBlizzardAccessToken(): String {
 
     if (result is Result.Failure) {
         val ex = result.getException()
-        logger.error(ex) { "Error pulling server info" }
+        logger.error(ex) { "Error refreshing access token." }
+        throw ex
     }
+
     val dataString = result.get()
     val blizzardResponse = mapper.readValue<BlizzardOAuthToken>(dataString)
     return blizzardResponse.access_token

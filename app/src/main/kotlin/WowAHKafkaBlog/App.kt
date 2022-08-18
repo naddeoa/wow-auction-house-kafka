@@ -63,7 +63,6 @@ fun refreshBlizzardAccessToken(): String {
     return blizzardResponse.access_token
 }
 
-
 fun forPath(array: JsonNode, block: (Int, String, Any) -> Unit) {
     if (!array.isArray) {
         throw IllegalArgumentException("Must be an array")

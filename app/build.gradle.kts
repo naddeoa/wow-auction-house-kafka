@@ -67,6 +67,9 @@ dependencies {
     implementation("com.amazonaws:aws-lambda-java-events:3.11.0")
     runtimeOnly("com.amazonaws:aws-lambda-java-log4j2:1.5.1")
 
+    // S3
+    implementation("com.amazonaws:aws-java-sdk-s3:1.12.298")
+
     // Kafka
     implementation("org.apache.kafka:kafka-clients:3.2.0")
     implementation("com.github.kittinunf.fuel:fuel:2.3.1")

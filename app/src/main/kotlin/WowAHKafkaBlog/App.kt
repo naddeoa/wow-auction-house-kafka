@@ -1,6 +1,10 @@
 package WowAHKafkaBlog
 
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain
+import com.amazonaws.services.s3.AmazonS3
+import com.amazonaws.services.s3.AmazonS3ClientBuilder
 import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import com.fasterxml.jackson.module.kotlin.readValue
 import com.github.kittinunf.fuel.core.Method
@@ -15,7 +19,9 @@ import com.github.michaelbull.retry.policy.plus
 import com.github.michaelbull.retry.retry
 import io.javalin.Javalin
 import java.time.Duration
+import java.time.Instant
 import java.time.temporal.ChronoUnit
+import java.util.UUID
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -31,11 +37,21 @@ val mapper = jacksonObjectMapper()
 val kafkaCluster = System.getenv("KAFKA_BOOTSTRAP_SERVER") ?: "localhost:9092"
 val kafkaTopic = System.getenv("KAFKA_TOPIC") ?: "wow-ah"
 
+val s3Bucket: String? = System.getenv("S3_BUCKET")
+val s3Prefix: String? = System.getenv("S3_PREFIX")
+
 val apiClientId =
     System.getenv("API_CLIENT_ID")?.ifEmpty { throw IllegalArgumentException("Missing API_CLIENT_ID") }
         ?: throw IllegalArgumentException("Missing API_CLIENT_ID")
 val apiSecret = System.getenv("API_CLIENT_SECRET")?.ifEmpty { throw IllegalArgumentException("Missing API_CLIENT_SECRET") }
     ?: throw IllegalArgumentException("Missing API_CLIENT_SECRET")
+
+
+val s3Client: AmazonS3 by lazy {
+    val credentials = DefaultAWSCredentialsProviderChain()
+    AmazonS3ClientBuilder.standard().withRegion("us-west-2").withCredentials(credentials)
+        .build()
+}
 
 
 data class BlizzardOAuthToken(
@@ -92,7 +108,9 @@ fun forPath(array: JsonNode, block: (Int, String, Any) -> Unit) {
     helper(array)
 }
 
-fun toFlatDict(array: JsonNode): Collection<Map<String, Any>> {
+typealias FlatDict = Collection<Map<String, Any>>
+
+fun toFlatDict(array: JsonNode): FlatDict {
     val allItems = mutableMapOf<Int, MutableMap<String, Any>>()
     forPath(array) { id, key, value ->
         val item = allItems.computeIfAbsent(id) { mutableMapOf() }
@@ -145,15 +163,29 @@ fun getAuctionHouseData(): JsonNode? {
         return null
     }
 
+    if (!auctions.isArray) {
+        throw IllegalArgumentException("Unexpected data format from blizzard api.")
+    }
+
     lastRunModifiedIso = lastModifiedIso
     logger.info("Got AH data updated at $lastRunModifiedIso")
     logger.info("Got ${auctions.size()} auctions")
+
+    val batchId = UUID.randomUUID().toString()
+    auctions.forEach { auction ->
+        val auctionObject = auction as ObjectNode
+        auctionObject.put("timestamp", lastModifiedIso)
+        auctionObject.put("batch_id", batchId)
+        auctionObject.put("server", "kiljaeden")
+        auctionObject.put("server_id", 9)
+    }
+
     return auctions
 }
 
 val defaultRetryPolicy: RetryPolicy<Throwable> = limitAttempts(5) + fullJitterBackoff(base = 10, max = 1000)
 fun enqueueAuctionData() = runBlocking {
-    try {
+    val auctions = try {
         val auctions = retry(defaultRetryPolicy) {
             getAuctionHouseData()
         }
@@ -164,16 +196,82 @@ fun enqueueAuctionData() = runBlocking {
             return@runBlocking
         }
 
-        // For each auction, send to kafka
+        auctions
+    } catch (ex: Throwable) {
+        // Swallow errors here to avoid executorService cancelling the schedule
+        logger.error(ex) { "Error pulling auction data" }
+        return@runBlocking
+    }
+
+    val flatDict = try {
+        toFlatDict(auctions)
+    } catch (ex: Throwable) {
+        // Swallow errors here to avoid executorService cancelling the schedule
+        logger.error(ex) { "Error parsing data" }
+        return@runBlocking
+    }
+
+
+    if (s3Bucket != null && s3Prefix != null) {
+        try {
+            val csv = createCsv(flatDict)
+            writeToS3(s3Bucket, s3Prefix, csv)
+        } catch (ex: Throwable) {
+            // Swallow errors here to avoid executorService cancelling the schedule
+            logger.error(ex) { "Error writing data to s3" }
+        }
+    }
+
+    try {
         logger.info("Sending ${auctions.size()} auctions to kafka")
-        toFlatDict(auctions).forEach { data ->
+        flatDict.forEach { data ->
             val record = ProducerRecord<String, String>(kafkaTopic, mapper.writeValueAsString(data))
             producer.send(record)
         }
     } catch (ex: Throwable) {
         // Swallow errors here to avoid executorService cancelling the schedule
-        logger.error(ex) { "Error pulling auction data" }
+        logger.error(ex) { "Error sending data to kafka" }
     }
+}
+
+fun createCsv(data: FlatDict): String {
+    val columns: MutableMap<String, Int> = LinkedHashMap()
+    val rows: MutableList<Map<Int, Any>> = mutableListOf()
+
+    data.forEach {
+        val row = LinkedHashMap<Int, Any>()
+        it.entries.forEach { (key, value) ->
+            val valueIndex: Int = if (columns.containsKey(key)) {
+                columns[key] ?: throw IllegalStateException("impossible")
+            } else {
+                val index = columns.size
+                columns[key] = columns.size
+                index
+            }
+
+            row[valueIndex] = value
+        }
+
+        rows.add(row)
+    }
+
+
+    val sb = StringBuilder()
+    sb.appendLine(columns.keys.joinToString(","))
+    rows.forEach { row ->
+        val rowData = arrayOfNulls<Any?>(columns.keys.size)
+        for (i in columns.keys.indices) {
+            rowData[i] = row[i]
+        }
+        sb.appendLine(rowData.map { it ?: "" }.joinToString(","))
+    }
+
+    return sb.toString()
+}
+
+fun writeToS3(bucketName: String, prefix: String, content: String) {
+    val fileName = Instant.now().toString()
+    s3Client.putObject(bucketName, "$prefix/$fileName.csv", content)
 }
 
 private val executorService: ScheduledExecutorService = Executors.newScheduledThreadPool(1)

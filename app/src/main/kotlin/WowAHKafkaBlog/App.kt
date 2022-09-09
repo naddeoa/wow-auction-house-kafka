@@ -20,6 +20,9 @@ import com.github.michaelbull.retry.retry
 import io.javalin.Javalin
 import java.time.Duration
 import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.UUID
 import java.util.concurrent.Executors
@@ -38,7 +41,7 @@ val kafkaCluster = System.getenv("KAFKA_BOOTSTRAP_SERVER") ?: "localhost:9092"
 val kafkaTopic = System.getenv("KAFKA_TOPIC") ?: "wow-ah"
 
 val s3Bucket: String? = System.getenv("S3_BUCKET")
-val s3Prefix: String? = System.getenv("S3_PREFIX")
+val s3CsvPrefix: String? = System.getenv("S3_CSV_PREFIX")
 
 val apiClientId =
     System.getenv("API_CLIENT_ID")?.ifEmpty { throw IllegalArgumentException("Missing API_CLIENT_ID") }
@@ -132,6 +135,17 @@ val producer: KafkaProducer<String, String> by lazy {
 }
 
 var lastRunModifiedIso: String? = null
+
+fun parseBlizzardDateString(date: String): Long? {
+    return try {
+        val parsedDate = LocalDateTime.parse(date, DateTimeFormatter.ofPattern("E, d MMM yyyy H:mm:ss z"))
+        parsedDate.toInstant(ZoneOffset.UTC).toEpochMilli()
+    } catch (t: Throwable) {
+        logger.error("Couldn't parse blizzard's date to get epoch time $date", t)
+        null
+    }
+}
+
 fun getAuctionHouseData(): JsonNode? {
     logger.info("Making auction house api call")
     val token = refreshBlizzardAccessToken()
@@ -171,10 +185,20 @@ fun getAuctionHouseData(): JsonNode? {
     logger.info("Got AH data updated at $lastRunModifiedIso")
     logger.info("Got ${auctions.size()} auctions")
 
+    try {
+        val parsedDate = LocalDateTime.parse(lastModifiedIso, DateTimeFormatter.ofPattern("E, d MMM yyyy H:mm:ss z"))
+        val millis = parsedDate.toInstant(ZoneOffset.UTC).toEpochMilli()
+        logger.warn("date $parsedDate is $millis")
+    } catch (t: Throwable) {
+        logger.error("huh", t)
+        throw t
+    }
+
     val batchId = UUID.randomUUID().toString()
     auctions.forEach { auction ->
         val auctionObject = auction as ObjectNode
-        auctionObject.put("timestamp", lastModifiedIso)
+        auctionObject.put("timestamp_iso", lastModifiedIso)
+        auctionObject.put("timestamp", parseBlizzardDateString(lastModifiedIso))
         auctionObject.put("batch_id", batchId)
         auctionObject.put("server", "kiljaeden")
         auctionObject.put("server_id", 9)
@@ -212,10 +236,10 @@ fun enqueueAuctionData() = runBlocking {
     }
 
 
-    if (s3Bucket != null && s3Prefix != null) {
+    if (s3Bucket != null && s3CsvPrefix != null) {
         try {
             val csv = createCsv(flatDict)
-            writeToS3(s3Bucket, s3Prefix, csv)
+            writeToS3(s3Bucket, s3CsvPrefix, csv)
         } catch (ex: Throwable) {
             // Swallow errors here to avoid executorService cancelling the schedule
             logger.error(ex) { "Error writing data to s3" }

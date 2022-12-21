@@ -123,6 +123,46 @@ fun toFlatDict(array: JsonNode): FlatDict {
     return allItems.values
 }
 
+enum class AuctionTimeLeft(val jsonValue: String) {
+    SHORT("\"SHORT\""),
+    MEDIUM("\"MEDIUM\""),
+    LONG("\"LONG\""),
+    VERY_LONG("\"VERY_LONG\"")
+}
+fun addOutputs(dict: FlatDict): FlatDict {
+
+    var predictedSalesTotal: Long = 0
+    dict.forEach { row ->
+        val buyout = row["buyout"] as JsonNode
+        val bid = row["bid"]
+        val timeLeft = (row["time_left"] as JsonNode).toString()
+
+        if(timeLeft == AuctionTimeLeft.SHORT.jsonValue){
+            predictedSalesTotal +=  buyout.longValue()
+        } else if(timeLeft == AuctionTimeLeft.MEDIUM.name && Math.random() > .6){
+            predictedSalesTotal +=  buyout.longValue()
+        } else if(timeLeft == AuctionTimeLeft.LONG.name && Math.random() > .3){
+            predictedSalesTotal +=  buyout.longValue()
+        } else if(timeLeft == AuctionTimeLeft.VERY_LONG.name && Math.random() > .1){
+            predictedSalesTotal +=  buyout.longValue()
+        }
+    }
+
+    val bids = dict.filter { row ->
+        val bid = row["bid"]
+        bid == null
+    }.size
+
+    val outputs = mapOf<String, Any>(
+        "output_predicted_sales_total" to predictedSalesTotal,
+        "output_bid_ratio" to bids.toFloat() / dict.size.toFloat(),
+    )
+
+    val newList = dict.toMutableList()
+    newList.add(outputs)
+    return newList
+}
+
 val producer: KafkaProducer<String, String> by lazy {
     logger.info("Connecting to kafka cluster at $kafkaCluster")
     val consumerConfig = mapOf(
@@ -246,9 +286,16 @@ fun enqueueAuctionData() = runBlocking {
         }
     }
 
+    val dataAndOutputs = try {
+        addOutputs(flatDict)
+    } catch(t: Throwable){
+        logger.error(t){ "Error computing the outputs" }
+        flatDict
+    }
+
     try {
         logger.info("Sending ${auctions.size()} auctions to kafka")
-        flatDict.forEach { data ->
+        dataAndOutputs.forEach { data ->
             val record = ProducerRecord<String, String>(kafkaTopic, mapper.writeValueAsString(data))
             producer.send(record)
         }

@@ -1,6 +1,7 @@
 JAR_PATH=./app/build/libs/app-standalone.jar
 SRC=$(shell find ./ -name "*.kt") ./app/build.gradle.kts
-TAG=naddeoa/wow-ah-data-poller:latest
+TAG=$(shell git rev-parse HEAD)
+NAME=naddeoa/wow-ah-data-poller:$(TAG)
 
 .PHONY:jar run build-docker run-docker push-docker stack
 
@@ -14,13 +15,13 @@ run:
 	API_CLIENT_ID=$(API_CLIENT_ID) API_CLIENT_SECRET=$(API_CLIENT_SECRET) java -jar $(JAR_PATH) 
 
 build-docker:$(JAR_PATH)
-	docker build . -t $(TAG)
+	docker build . -t $(NAME)
 
 run-docker:
-	docker run --net=host --env-file conf.env $(TAG)
+	docker run --net=host --env-file conf.env $(NAME)
 
 push-docker:
-	docker push $(TAG)
+	docker push $(NAME)
 
 stack:
 	docker compose --env-file compose.env down

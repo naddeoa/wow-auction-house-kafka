@@ -158,6 +158,8 @@ fun addOutputs(dict: FlatDict): FlatDict {
         "output_bid_ratio" to bids.toFloat() / dict.size.toFloat(),
     )
 
+    logger.info("Added additional outputs $outputs")
+
     val newList = dict.toMutableList()
     newList.add(outputs)
     return newList
